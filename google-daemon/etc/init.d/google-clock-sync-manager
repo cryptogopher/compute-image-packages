@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/sbin/runscript
 # Copyright 2015 Google Inc. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,11 +24,18 @@
 #        placed in /etc/init.d.
 ### END INIT INFO
 
+depend ()
+{
+  need net
+  use logger
+  provide google-clock-manager
+}
+
 # Do NOT "set -e"
 
 # PATH should only include /usr/* if it runs after the mountnfs.sh script
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
-DESC="Google clock sync manager"
+description="Google clock sync manager"
 NAME=google-clock-sync-manager
 DAEMON=/usr/share/google/google_daemon/manage_clock_sync.py
 DAEMON_ARGS=""
@@ -40,27 +47,6 @@ SCRIPTNAME=/etc/init.d/$NAME
 
 # Read configuration variable file if it is present
 [ -r /etc/default/$NAME ] && . /etc/default/$NAME
-
-# Load the VERBOSE setting and other rcS variables
-. /lib/init/vars.sh
-
-# Define LSB log_* functions.
-# Depend on lsb-base (>= 3.2-14) to ensure that this file is present
-# and status_of_proc is working.
-. /lib/lsb/init-functions
-
-# If we're running under upstart, let the upstart config file handle things.
-# Debian 7 and newer have a near-one-liner function to detect this...
-if type init_is_upstart >/dev/null 2>&1; then
-  # ... which we can use if present.
-  init_is_upstart && exit 0
-else
-  # Otherwise, directly include the core line of Debian 7's version.
-  # Authorship credit: http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=661109
-  if [ -x /sbin/initctl ] && /sbin/initctl version | /bin/grep -q upstart; then
-    exit 0
-  fi
-fi
 
 #
 # Function that starts the daemon/service
@@ -106,48 +92,138 @@ do_stop()
   return "$RETVAL"
 }
 
-case "$1" in
-  start)
-    [ "$VERBOSE" != no ] && log_daemon_msg "Starting $DESC" "$NAME"
+start ()
+{
+    ebegin "Starting $DESC $NAME"
     do_start
     case "$?" in
-      0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
-      2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+      0|1) eend 0 ;;
+      2) eend 1 ;;
     esac
-    ;;
-  stop)
-    [ "$VERBOSE" != no ] && log_daemon_msg "Stopping $DESC" "$NAME"
+}
+
+stop ()
+{
+    ebegin "Stopping $DESC $NAME"
     do_stop
     case "$?" in
-      0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
-      2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+      0|1) eend 0 ;;
+      2) eend 1 ;;
     esac
-    ;;
-  status)
+}
+
+status_of_proc () 
+{ 
+  local pidfile daemon name status OPTIND;
+  pidfile=;
+  OPTIND=1;
+  while getopts p: opt; do
+    case "$opt" in 
+      p)
+        pidfile="$OPTARG"
+        ;;
+    esac;
+  done;
+  shift $(($OPTIND - 1));
+  if [ -n "$pidfile" ]; then
+    pidfile="-p $pidfile";
+  fi;
+  daemon="$1";
+  name="$2";
+  status="0";
+  pidofproc $pidfile $daemon > /dev/null || status="$?";
+  if [ "$status" = 0 ]; then
+    einfo "$name is running";
+    return 0;
+  else
+    if [ "$status" = 4 ]; then
+      eerror "could not access PID file for $name";
+      return $status;
+    else
+      eerror "$name is not running";
+      return $status;
+    fi;
+  fi
+}
+
+pidofproc () {
+  local pidfile base status specified pid OPTIND
+  pidfile=
+  specified=
+
+  OPTIND=1
+  while getopts p: opt ; do
+    case "$opt" in
+      p)  pidfile="$OPTARG"
+        specified="specified"
+        ;;
+    esac
+  done
+  shift $(($OPTIND - 1))
+  if [ $# -ne 1 ]; then
+    echo "$0: invalid arguments" >&2
+    return 4
+  fi
+
+  base=${1##*/}
+  if [ ! "$specified" ]; then
+    pidfile="/var/run/$base.pid"
+  fi
+
+  if [ -n "${pidfile:-}" -a -r "$pidfile" ]; then
+    read pid < "$pidfile"
+    if [ -n "${pid:-}" ]; then
+      if $(kill -0 "${pid:-}" 2> /dev/null); then
+        echo "$pid" || true
+        return 0
+      elif ps "${pid:-}" >/dev/null 2>&1; then
+        echo "$pid" || true
+        return 0 # program is running, but not owned by this user
+      else
+        return 1 # program is dead and /var/run pid file exists
+      fi
+    fi
+  fi
+  if [ -n "$specified" ]; then
+    if [ -e "$pidfile" -a ! -r "$pidfile" ]; then
+      return 4 # pidfile exists, but unreadable, return unknown
+    else
+      return 3 # pidfile specified, but contains no PID to test
+    fi
+  fi
+  if [ -x /bin/pidof ]; then
+    status="0"
+    /bin/pidof -o %PPID -x $1 || status="$?"
+    if [ "$status" = 1 ]; then
+      return 3 # program is not running
+    fi
+    return 0
+  fi
+  return 4 # Unable to determine status
+}
+
+status ()
+{
     status_of_proc -p "$PIDFILE" "$DAEMON" "$NAME" && exit 0 || exit $?
-    ;;
-  restart|force-reload)
-    log_daemon_msg "Restarting $DESC" "$NAME"
+}
+
+restart ()
+{
+    ebegin "Restarting $DESC $NAME"
     do_stop
     case "$?" in
       0|1)
         do_start
         case "$?" in
-          0) log_end_msg 0 ;;
-          1) log_end_msg 1 ;; # Old process is still running
-          *) log_end_msg 1 ;; # Failed to start
+          0) eend 0 ;;
+          1) eend 1 ;; # Old process is still running
+          *) eend 1 ;; # Failed to start
         esac
         ;;
       *)
         # Failed to stop
-        log_end_msg 1
+        eend 1
         ;;
     esac
-    ;;
-  *)
-    echo "Usage: $SCRIPTNAME {start|stop|status|restart|force-reload}" >&2
-    exit 3
-    ;;
-esac
+}
 
-:
