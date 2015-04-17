@@ -34,7 +34,7 @@ depend ()
 # Do NOT "set -e"
 
 # PATH should only include /usr/* if it runs after the mountnfs.sh script
-PATH=/sbin:/usr/sbin:/bin:/usr/bin
+PATH=/lib/rc/bin:/sbin:/usr/sbin:/bin:/usr/bin
 description="Google IP address manager"
 NAME=google-address-manager
 DAEMON=/usr/share/google/google_daemon/manage_addresses.py
